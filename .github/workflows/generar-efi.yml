@@ -22,7 +22,7 @@ jobs:
           PATCHER="/Library/Application Support/Dortania/OpenCore-Patcher.app/Contents/MacOS/OpenCore-Patcher"
           test -x "$PATCHER"
           cd "$GITHUB_WORKSPACE"
-          "$PATCHER" --build --model iMac14,1 --disable-sip --disable-smb --verbose
+          "$PATCHER" --build --model iMac14,1 --disable_sip --disable_smb --verbose
           test -f "Build-Folder/OpenCore-Build/EFI/OC/config.plist"
           test -f "Build-Folder/OpenCore-Build/EFI/BOOT/BOOTx64.efi"
           mkdir -p "$RUNNER_TEMP/EFI-resultado"
