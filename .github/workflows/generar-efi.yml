@@ -6,29 +6,77 @@ on:
 jobs:
   build-efi:
     runs-on: macos-15-intel
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - name: Descargar OpenCore Legacy Patcher 2.5.1 oficial
+      - name: Instalar OpenCore Legacy Patcher 2.5.1
         shell: bash
         run: |
           curl --fail --location --retry 3 --output "$RUNNER_TEMP/OpenCore-Patcher.pkg" \
-            https://github.com/dortania/OpenCore-Legacy-Patcher/releases/download/2.5.1/OpenCore-Patcher.pkg
+            'https://github.com/dortania/OpenCore-Legacy-Patcher/releases/download/2.5.1/OpenCore-Patcher.pkg'
           sudo installer -pkg "$RUNNER_TEMP/OpenCore-Patcher.pkg" -target /
 
-      - name: Generar EFI para iMac14,1
+      - name: Generar y guardar la EFI (antes de cerrar OCLP)
         shell: bash
         run: |
           set -euo pipefail
-          PATCHER="/Library/Application Support/Dortania/OpenCore-Patcher.app/Contents/MacOS/OpenCore-Patcher"
-          test -x "$PATCHER"
-          cd "$GITHUB_WORKSPACE"
-          "$PATCHER" --build --model iMac14,1 --disable_sip --disable_smb --verbose
-          test -f "Build-Folder/OpenCore-Build/EFI/OC/config.plist"
-          test -f "Build-Folder/OpenCore-Build/EFI/BOOT/BOOTx64.efi"
-          mkdir -p "$RUNNER_TEMP/EFI-resultado"
-          cp -R "Build-Folder/OpenCore-Build/EFI" "$RUNNER_TEMP/EFI-resultado/"
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import shutil
+          import signal
+          import subprocess
+          import sys
 
-      - name: Descargar EFI creada
+          patcher = '/Library/Application Support/Dortania/OpenCore-Patcher.app/Contents/MacOS/OpenCore-Patcher'
+          if not os.path.isfile(patcher):
+              raise SystemExit('No se encontró OpenCore-Patcher instalado.')
+
+          cmd = [patcher, '--build', '--model', 'iMac14,1',
+                 '--disable_sip', '--disable_smb', '--verbose']
+          proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True,
+                                  bufsize=1, cwd=os.environ['GITHUB_WORKSPACE'])
+          tmpdir = None
+          captured = False
+          try:
+              for line in proc.stdout:
+                  print(line, end='', flush=True)
+                  if 'New payloads location: ' in line:
+                      tmpdir = line.strip().split('New payloads location: ', 1)[1]
+                  if 'Your OpenCore EFI for iMac14,1 has been built at:' in line:
+                      # OCLP limpia su carpeta temporal al salir. Lo detenemos
+                      # un instante para conservar una copia de la EFI ya validada.
+                      os.kill(proc.pid, signal.SIGSTOP)
+                      try:
+                          if not tmpdir:
+                              raise RuntimeError('No se detectó la carpeta temporal de OCLP.')
+                          src = pathlib.Path(tmpdir) / 'Build-Folder/OpenCore-Build/EFI'
+                          expected = [src / 'OC/config.plist',
+                                      src / 'OC/OpenCore.efi',
+                                      src / 'BOOT/BOOTx64.efi']
+                          missing = [str(path) for path in expected if not path.is_file()]
+                          if missing:
+                              raise RuntimeError('Faltan archivos en EFI: ' + ', '.join(missing))
+                          dst = pathlib.Path(os.environ['RUNNER_TEMP']) / 'EFI-resultado/EFI'
+                          dst.parent.mkdir(parents=True, exist_ok=True)
+                          shutil.copytree(src, dst, dirs_exist_ok=True)
+                          captured = True
+                          print('EFI guardada en:', dst, flush=True)
+                      finally:
+                          os.kill(proc.pid, signal.SIGCONT)
+              code = proc.wait()
+          finally:
+              if proc.poll() is None:
+                  proc.terminate()
+                  proc.wait()
+
+          if not captured:
+              raise SystemExit('ERROR: no se pudo extraer la EFI del directorio temporal.')
+          if code != 0:
+              print(f'Aviso: OCLP devolvió código {code}; la EFI se capturó y validó.', flush=True)
+          PY
+
+      - name: Publicar EFI para descargar
         uses: actions/upload-artifact@v4
         with:
           name: EFI-OCLP-2.5.1-iMac14-1
