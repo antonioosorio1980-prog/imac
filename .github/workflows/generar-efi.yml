@@ -1,0 +1,37 @@
+name: Generar EFI OCLP para iMac14,1
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-efi:
+    runs-on: macos-15-intel
+    timeout-minutes: 25
+    steps:
+      - name: Descargar OpenCore Legacy Patcher 2.5.1 oficial
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/OpenCore-Patcher.pkg" \
+            https://github.com/dortania/OpenCore-Legacy-Patcher/releases/download/2.5.1/OpenCore-Patcher.pkg
+          sudo installer -pkg "$RUNNER_TEMP/OpenCore-Patcher.pkg" -target /
+
+      - name: Generar EFI para iMac14,1
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCHER="/Library/Application Support/Dortania/OpenCore-Patcher.app/Contents/MacOS/OpenCore-Patcher"
+          test -x "$PATCHER"
+          cd "$GITHUB_WORKSPACE"
+          "$PATCHER" --build --model iMac14,1 --disable-sip --disable-smb --verbose
+          test -f "Build-Folder/OpenCore-Build/EFI/OC/config.plist"
+          test -f "Build-Folder/OpenCore-Build/EFI/BOOT/BOOTx64.efi"
+          mkdir -p "$RUNNER_TEMP/EFI-resultado"
+          cp -R "Build-Folder/OpenCore-Build/EFI" "$RUNNER_TEMP/EFI-resultado/"
+
+      - name: Descargar EFI creada
+        uses: actions/upload-artifact@v4
+        with:
+          name: EFI-OCLP-2.5.1-iMac14-1
+          path: ${{ runner.temp }}/EFI-resultado/EFI/
+          if-no-files-found: error
+          retention-days: 7
